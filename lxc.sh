@@ -79,7 +79,7 @@ elif [ "$1" == "create" ]; then
 
   sudo lxc-start -n $NAME
   sudo lxc-attach -n $NAME <<EOF
-while ! ping -q -c 1 -W 1 vazor.com; do
+while ! ping -q -c 1 -W 1 google.com; do
   sleep 1
 done
 if [ "\$(which apt)" != "" ]; then
