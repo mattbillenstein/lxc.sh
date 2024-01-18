@@ -2,9 +2,11 @@
 
 set -eo pipefail
 
-# to use this, we setup a network bridge
-# /etc/netplan/50-cloud-init.yaml
+# I like to ssh to these containers, so I bridge networking over ethernet which
+# doesn't work over wifi - ymmv.
 
+# /etc/netplan/50-cloud-init.yaml
+#
 #network:
 #    version: 2
 #    ethernets:
@@ -34,8 +36,9 @@ set -eo pipefail
 # kinetic 22.10
 # lunar   23.04
 # mantic  23.10
-# ?       24.04
+# noble   24.04
 
+USER="$(id -un)"
 LXCDIR="/var/lib/lxc"
 
 MARCH="$(uname -m)"
@@ -60,7 +63,6 @@ elif [ "$1" == "create" ]; then
   if [ "$REL" == "" ]; then
     REL="jammy"
   fi
-#  sudo lxc-create -t download -n name -- --dist ubuntu --release DISTRO-SHORT-CODENAME --arch amd64
   sudo lxc-create -t download -n $NAME -- --dist $DIST --release $REL --arch $MARCH
 
   VMDIR="$LXCDIR/$NAME"
@@ -81,7 +83,7 @@ while ! ping -q -c 1 -W 1 vazor.com; do
   sleep 1
 done
 if [ "\$(which apt)" != "" ]; then
-  adduser --disabled-password --gecos "" mattb
+  adduser --disabled-password --gecos "" $USER
   apt -y update
   apt -y install openssh-server git rsync tmux vim
 elif [ "\$(which apk)" != "" ]; then
@@ -98,23 +100,23 @@ elif [ "\$(which apk)" != "" ]; then
   rc-update add sshd default
   rc-service sshd start
 
-  adduser -D -g "" -s /bin/bash mattb
-  passwd -u mattb
-  echo 'source ~/.bashrc' > /home/mattb/.bash_profile
+  adduser -D -g "" -s /bin/bash $USER
+  passwd -u $USER
+  echo 'source ~/.bashrc' > /home/$USER/.bash_profile
 
   mkdir /dev/shm
   echo 'tmpfs /dev/shm tmpfs defaults,noexec,nodev,nosuid,size=128M 0 0' >> /etc/fstab
   mount /dev/shm
 fi
-echo "mattb ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-mattb
+echo "$USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-$USER
 EOF
 
   # install my dotfiles, this is kinda barf
-  sudo mkdir -p $ROOTFS/home/mattb/src/mattb
-  sudo cp -a $HOME/src/mattb/dotfiles $ROOTFS/home/mattb/src/mattb/
-  sudo chmod 755 $ROOTFS/home/mattb/src/mattb/dotfiles
-  sudo chown -R $(sudo grep mattb $ROOTFS/etc/passwd | awk -F : '{printf "%s:%s\n", $3, $4}') $ROOTFS/home/mattb
-  sudo lxc-attach -n $NAME -- sudo -u mattb bash -c 'cd ~/src/mattb/dotfiles; ./install.sh;ip addr show dev eth0 | grep "inet "'
+  sudo mkdir -p $ROOTFS/home/$USER/src/$USER
+  sudo cp -a $HOME/src/$USER/dotfiles $ROOTFS/home/$USER/src/$USER/
+  sudo chmod 755 $ROOTFS/home/$USER/src/$USER/dotfiles
+  sudo chown -R $(sudo grep $USER $ROOTFS/etc/passwd | awk -F : '{printf "%s:%s\n", $3, $4}') $ROOTFS/home/$USER
+  sudo lxc-attach -n $NAME -- sudo -u $USER bash -c 'cd ~/src/$USER/dotfiles; ./install.sh;ip addr show dev eth0 | grep "inet "'
 elif [ "$1" == "destroy" ]; then
   shift
   sudo lxc-stop -n $1 &>/dev/null || true
@@ -136,4 +138,6 @@ else
   echo "$ ./lxc.sh start <name>"
   echo "$ ./lxc.sh stop <name>"
   echo "$ ./lxc.sh shell <name>"
+  echo
+  sudo lxc-ls --fancy
 fi
