@@ -2,11 +2,13 @@
 
 set -eo pipefail
 
+# sudo apt-get install lxc-utils
+
 # I like to ssh to these containers, so I bridge networking over ethernet which
 # doesn't work over wifi - ymmv.
 
 # /etc/netplan/50-cloud-init.yaml
-#
+
 #network:
 #    version: 2
 #    ethernets:
@@ -69,12 +71,20 @@ elif [ "$1" == "create" ]; then
   ROOTFS="$VMDIR/rootfs"
 
   if [ "$DIST" == "ubuntu" ]; then
+    if [ "$REL" == "noble" ]; then
+      # fix apparmor problems with noble...  2024-10-20
+      printf "\nlxc.apparmor.profile = unconfined\n" | sudo tee -a /var/lib/lxc/$NAME/config
+    fi
+
     # prefer ipv4
     echo 'precedence ::ffff:0:0/96  100' | sudo tee -a $ROOTFS/etc/gai.conf
 
-    # bah, systemd-resolved doesn't handle local dns
-    sudo rm $ROOTFS/etc/resolv.conf
-    sudo cp /etc/resolv.conf $ROOTFS/etc/
+    # bah, systemd-resolved doesn't handle local dns, but only do this on
+    # bridged networks...
+    if grep -q 'lxc.net.0.link = br0' /etc/lxc/default.conf; then
+      sudo rm $ROOTFS/etc/resolv.conf
+      sudo cp /etc/resolv.conf $ROOTFS/etc/
+    fi
   fi
 
   sudo lxc-start -n $NAME
@@ -82,10 +92,10 @@ elif [ "$1" == "create" ]; then
 while ! ping -q -c 1 -W 1 google.com; do
   sleep 1
 done
-if [ "\$(which apt)" != "" ]; then
+if [ "\$(which apt-get)" != "" ]; then
   adduser --disabled-password --gecos "" $USER
-  apt -y update
-  apt -y install openssh-server git rsync tmux vim
+  apt-get -y update
+  apt-get -y install curl openssh-server git rsync tmux vim
 elif [ "\$(which apk)" != "" ]; then
   apk update
   apk add bash
@@ -107,6 +117,8 @@ elif [ "\$(which apk)" != "" ]; then
   mkdir /dev/shm
   echo 'tmpfs /dev/shm tmpfs defaults,noexec,nodev,nosuid,size=128M 0 0' >> /etc/fstab
   mount /dev/shm
+else
+  echo 'Unknown platform'
 fi
 echo "$USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-$USER
 EOF
@@ -130,6 +142,9 @@ elif [ "$1" == "stop" ]; then
 elif [ "$1" == "shell" ]; then
   shift
   sudo lxc-attach -n $1 -- /bin/bash
+elif [ "$1" == "cpuset" ]; then
+  shift
+  sudo lxc-cgroup -n $1 cpuset.cpus $2   # 0-3 for 4 cpus
 else
   echo "$ ./lxc.sh find"
   echo "$ ./lxc.sh list"
@@ -138,6 +153,7 @@ else
   echo "$ ./lxc.sh start <name>"
   echo "$ ./lxc.sh stop <name>"
   echo "$ ./lxc.sh shell <name>"
+  echo "$ ./lxc.sh cpuset <name> <cpus>"
   echo
   sudo lxc-ls --fancy
 fi
